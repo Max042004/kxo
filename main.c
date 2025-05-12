@@ -2,6 +2,7 @@
 
 #include <linux/cdev.h>
 #include <linux/circ_buf.h>
+#include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/kfifo.h>
 #include <linux/module.h>
@@ -12,6 +13,7 @@
 #include <linux/workqueue.h>
 
 #include "game.h"
+#include "kxo_latency.h"
 #include "mcts.h"
 #include "negamax.h"
 
@@ -79,6 +81,11 @@ static struct class *kxo_class;
 static struct cdev kxo_cdev;
 
 static char draw_buffer[DRAWBUFFER_SIZE];
+
+static struct k2user_latency {
+    ktime_t t_start;
+    ktime_t t_end;
+} k2user_late;
 
 /* Data are stored into a kfifo buffer before passing them to the userspace */
 static DECLARE_KFIFO_PTR(rx_fifo, unsigned char);
@@ -161,6 +168,8 @@ static void drawboard_work_func(struct work_struct *w)
      */
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
+
+    k2user_late.t_start = ktime_get();
 
     /* Pretend to simulate access to per-CPU data, disabling preemption
      * during the pr_info().
@@ -399,8 +408,17 @@ static ssize_t kxo_read(struct file *file,
         ret = kfifo_to_user(&rx_fifo, buf, count, &read);
         if (unlikely(ret < 0))
             break;
-        if (read)
+        if (read) {
+            k2user_late.t_end = ktime_get();
+            s64 ns =
+                ktime_to_ns(ktime_sub(k2user_late.t_end, k2user_late.t_start));
+            k2user_late.t_end = 0;
+            k2user_late.t_start = 0;
+            if (unlikely(ns < 0))
+                break;
+            kxo_lat_record((u64) ns);
             break;
+        }
         if (file->f_flags & O_NONBLOCK) {
             ret = -EAGAIN;
             break;
@@ -451,6 +469,11 @@ static int __init kxo_init(void)
 {
     dev_t dev_id;
     int ret;
+    int lat_ret;
+
+    lat_ret = kxo_lat_debugfs_init();
+    if (lat_ret)
+        return lat_ret;
 
     if (kfifo_alloc(&rx_fifo, PAGE_SIZE, GFP_KERNEL) < 0)
         return -ENOMEM;
@@ -540,6 +563,7 @@ static void __exit kxo_exit(void)
 {
     dev_t dev_id = MKDEV(major, 0);
 
+    kxo_lat_debugfs_exit();
     del_timer_sync(&timer);
     tasklet_kill(&game_tasklet);
     flush_workqueue(kxo_workqueue);

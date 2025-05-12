@@ -7,3 +7,6 @@
 *.cmd
 *.symvers
 xo-user
+/venv-kxo
+*.png
+*.sh
