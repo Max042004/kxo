@@ -23,8 +23,7 @@ void kxo_lat_record(u64 nsec)
 EXPORT_SYMBOL_GPL(kxo_lat_record);
 
 /* ---------- seq_file 介面 ---------- */
-
-static void *lat_seq_start(struct seq_file *m, const loff_t *pos)
+static void *lat_seq_start(struct seq_file *m, loff_t *pos)
 {
     u32 head = atomic_read(&lat_head);
     if (*pos >= head) /* 只走到 head-1 就停 */

@@ -409,14 +409,16 @@ static ssize_t kxo_read(struct file *file,
         if (unlikely(ret < 0))
             break;
         if (read) {
-            k2user_late.t_end = ktime_get();
-            s64 ns =
-                ktime_to_ns(ktime_sub(k2user_late.t_end, k2user_late.t_start));
-            k2user_late.t_end = 0;
-            k2user_late.t_start = 0;
-            if (unlikely(ns < 0))
-                break;
-            kxo_lat_record((u64) ns);
+            if (k2user_late.t_start != 0) {
+                k2user_late.t_end = ktime_get();
+                s64 ns = ktime_to_ns(
+                    ktime_sub(k2user_late.t_end, k2user_late.t_start));
+                k2user_late.t_end = 0;
+                k2user_late.t_start = 0;
+                if (unlikely(ns < 0))
+                    break;
+                kxo_lat_record((u64) ns);
+            }
             break;
         }
         if (file->f_flags & O_NONBLOCK) {
